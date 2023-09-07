@@ -1,0 +1,106 @@
+version: "3"
+
+services:
+  postgres:
+    image: postgres:latest
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    #ports:
+    #  - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 3
+
+  supertokens:
+    image: supertokens/supertokens-postgresql:5.0
+    restart: always
+    #ports:
+    #  - "3567:3567"
+    environment:
+      POSTGRES_CONNECTION_URI: postgres://postgres:postgres@postgres:5432/supertokens
+
+  pezzo-server:
+    image: ghcr.io/pezzolabs/pezzo/server:0.5.6
+    restart: always
+    env_file:
+      - ./prd.env
+      - ./server.env
+    environment:
+      - DATABASE_URL=postgres://postgres:postgres@postgres:5432/pezzo
+      - SUPERTOKENS_CONNECTION_URI=http://supertokens:3567
+      - OPENSEARCH_URL=http://opensearch-node1:9200
+    ports:
+      - "63000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl 'http://pezzo-server:3000/api/healthz'"]
+      interval: 5s
+      timeout: 5s
+      retries: 3
+
+  pezzo-console:
+    image: ghcr.io/pezzolabs/pezzo/console:0.5.6
+    restart: always
+    env_file:
+      - ./prd.env
+      - ./console.env
+    ports:
+      - "64200:8080"
+    depends_on:
+      pezzo-server:
+        condition: service_healthy
+
+  opensearch-node1:
+    image: opensearchproject/opensearch:2.5.0
+    #container_name: opensearch-node1
+    environment:
+      - cluster.name=opensearch-cluster
+      - node.name=opensearch-node1
+      - discovery.type=single-node
+      - bootstrap.memory_lock=true
+      - "plugins.security.disabled=true"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    volumes:
+      - opensearch-data1:/usr/share/opensearch/data
+    #ports:
+    #  - 9200:9200 # REST API
+    #  - 9600:9600 # Performance Analyzer
+    deploy:
+      resources:
+        limits:
+          memory: 3g
+
+  opensearch-dashboards:
+    image: opensearchproject/opensearch-dashboards:2.5.0
+    #container_name: opensearch-dashboards
+    #ports:
+    #  - 5601:5601
+    expose:
+      - "5601"
+    environment:
+      - "DISABLE_SECURITY_DASHBOARDS_PLUGIN=true"
+      - "OPENSEARCH_HOSTS=http://opensearch-node1:9200"
+
+  redis-stack-server:
+    image: redis/redis-stack-server:7.2.0-v0
+    #container_name: redis-stack-server
+    #ports:
+    #  - "6379:6379"
+
+volumes:
+  postgres_data: ~
+  opensearch-data1:
